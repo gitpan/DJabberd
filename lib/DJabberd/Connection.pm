@@ -22,6 +22,7 @@ use fields (
             'iqctr',          # iq counter.  incremented whenever we SEND an iq to the party (roster pushes, etc)
             'in_stream',      # bool:  true if we're in a stream tag
             'counted_close',  # bool:  temporary here to track down the overcounting of disconnects
+            'disconnect_handlers',  # array of coderefs to call when this connection is closed for any reason
             );
 
 our $connection_id = 1;
@@ -45,7 +46,17 @@ our $hook_logger = DJabberd::Log->get_logger("DJabberd::Hook");
 use constant POLLIN        => 1;
 use constant POLLOUT       => 4;
 
-use constant XMLDEBUG      => "/tmp/djabberd/";
+BEGIN {
+    my $xmldebug = $ENV{XMLDEBUG};
+
+    if ($xmldebug) {
+        eval 'use constant XMLDEBUG => "' . quotemeta($xmldebug) . '"';
+        die "XMLDEBUG path '$xmldebug' needs to be a directory writable by the user you are running $0 as\n" unless -w $xmldebug;
+    } else {
+        eval "use constant XMLDEBUG => ''";
+    }
+}
+
 our %LOGMAP;
 
 sub new {
@@ -124,11 +135,13 @@ sub new_iq_id {
 
 sub log_outgoing_data {
     my ($self, $text) = @_;
+    my $id = $self->{id} ||= 'no_id';
+    
     if($self->xmllog->is_debug) {
-        $self->xmllog->debug("$self->{id} > " . $text);
+        $self->xmllog->debug("$id > " . $text);
     } else {
         local $DJabberd::ASXML_NO_TEXT = 1;
-        $self->xmllog->info("$self->{id} > " . $text);
+        $self->xmllog->info("$id > " . $text);
     }
 }
 
@@ -542,6 +555,7 @@ sub start_init_stream {
     my %opts = @_;
     my $extra_attr = delete $opts{'extra_attr'} || "";
     my $to         = delete $opts{'to'} || Carp::croak("need 'to' domain");
+    my $xmlns      = delete $opts{'xmlns'} || "jabber:server";
     die if %opts;
 
     # {=init-version-is-max} -- we must announce the highest version we support
@@ -554,7 +568,7 @@ sub start_init_stream {
     $to = "" if $DJabberd::_T_NO_TO_IN_DIALBACKVERIFY_STREAM;
 
     # {=xml-lang}
-    my $xml = qq{<?xml version="1.0" encoding="UTF-8"?><stream:stream $to xmlns:stream='http://etherx.jabber.org/streams' xmlns='jabber:server' xml:lang='en' $extra_attr $ver_attr>};
+    my $xml = qq{<?xml version="1.0" encoding="UTF-8"?><stream:stream $to xmlns:stream='http://etherx.jabber.org/streams' xmlns='}.exml($xmlns).qq{' xml:lang='en' $extra_attr $ver_attr>};
     $self->log_outgoing_data($xml);
     $self->write($xml);
 }
@@ -704,6 +718,25 @@ sub close_stream {
     $self->write(sub { $self->close; });
 }
 
+sub add_disconnect_handler {
+    my ($self, $callback) = @_;
+    $self->{disconnect_handlers} ||= [];
+    push @{$self->{disconnect_handlers}}, $callback;
+}
+
+sub _run_callback_list {
+    my ($self, $listref, @args) = @_;
+    
+    return unless ref $listref eq 'ARRAY';
+    
+    foreach my $callback (@$listref) {
+        next unless ref $callback eq 'CODE';
+        
+        $callback->($self, @args);
+    }
+    
+}
+
 sub close {
     my DJabberd::Connection $self = shift;
     return if $self->{closed};
@@ -716,6 +749,7 @@ sub close {
     }
 
     $self->log->debug("DISCONNECT: $self->{id}\n") if $self->{id};
+    $self->_run_callback_list($self->{disconnect_handlers});
 
     if (my $ssl = $self->{ssl}) {
         Net::SSLeay::free($ssl);
@@ -738,6 +772,7 @@ sub close {
         delete $LOGMAP{$self};
     }
     $self->SUPER::close;
+
 }
 
 # DJabberd::Connection

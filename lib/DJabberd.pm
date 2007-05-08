@@ -39,9 +39,9 @@ package DJabberd;
 use strict;
 use Socket qw(IPPROTO_TCP TCP_NODELAY SOL_SOCKET SOCK_STREAM);
 use Carp qw(croak);
-use DJabberd::Util qw(tsub as_bool as_num as_abs_path);
+use DJabberd::Util qw(tsub as_bool as_num as_abs_path as_bind_addr);
 
-our $VERSION = '0.81';
+our $VERSION = '0.82';
 
 our $logger = DJabberd::Log->get_logger();
 our $hook_logger = DJabberd::Log->get_logger("DJabberd::Hook");
@@ -132,17 +132,17 @@ sub set_config_unixdomainsocket {
 
 sub set_config_clientport {
     my ($self, $val) = @_;
-    $self->{c2s_port} = as_num($val);
+    $self->{c2s_port} = as_bind_addr($val);
 }
 
 sub set_config_serverport {
     my ($self, $val) = @_;
-    $self->{s2s_port} = as_num($val);
+    $self->{s2s_port} = as_bind_addr($val);
 }
 
 sub set_config_adminport {
     my ($self, $val) = @_;
-    $self->{admin_port} = as_num($val);
+    $self->{admin_port} = as_bind_addr($val);
 }
 
 sub set_config_intradomainlisten {
@@ -152,9 +152,7 @@ sub set_config_intradomainlisten {
 
 sub set_config_pidfile {
     my ($self, $val) = @_;
-    open(PIDFILE,'>',$val) or croak("Can't open pidfile $val for writing");
-    print PIDFILE "$$\n";
-    close(PIDFILE);
+    $self->{pid_file} = $val;
 }
 
 our %fake_peers;
@@ -270,7 +268,12 @@ sub run {
     my $self = shift;
     daemonize() if $self->{daemonize};
     local $SIG{'PIPE'} = "IGNORE";  # handled manually
-
+    if ($self->{pid_file}) {
+        $logger->debug("Logging PID to file $self->{pid_file}");
+        open(PIDFILE,'>',$self->{pid_file}) or $logger->logdie("Can't open pidfile $self->{pid_file} for writing");
+        print PIDFILE "$$\n";
+        close(PIDFILE);
+    }
     $self->start_c2s_server();
 
     # {=s2soptional}
@@ -282,6 +285,7 @@ sub run {
 
     DJabberd::Connection::Admin->on_startup;
     Danga::Socket->EventLoop();
+    unlink($self->{pid_file}) if (-f $self->{pid_file});
 }
 
 sub _start_server {
@@ -409,6 +413,19 @@ sub _load_config_ref {
     my $plugin; # current plugin in scope
     my @vhost_stack = ();
 
+    my $expand_var = sub {
+        my ($type, $key) = @_;
+        $type = uc $type;
+
+        if ($type eq "ENV") {
+            # expands ${ENV:KEY} on a line into $ENV{'KEY'} or dies if not defined
+            my $val = $ENV{$key};
+            die "Undefined environment variable '$key'\n" unless defined $val;
+            return $val;
+        }
+        die "Unknown variable type '$type'\n";
+    };
+
     foreach my $line (split(/\n/, $$configref)) {
         $linenum++;
 
@@ -418,6 +435,9 @@ sub _load_config_ref {
         next unless $line =~ /\S/;
 
         eval {
+            # expand environment variables
+            $line =~ s/\$\{(\w+):(\w+)\}/$expand_var->($1, $2)/eg;
+
             if ($line =~ /^(\w+)\s+(.+)/) {
                 my $pkey = $1;
                 my $key = lc $1;
@@ -439,6 +459,7 @@ sub _load_config_ref {
             if ($line =~ /<VHost\s+(\S+?)>/i) {
                 die "Can't configure a vhost in a vhost\n" if $vhost;
                 $vhost = DJabberd::VHost->new(server_name => $1);
+                $vhost->set_server($self);
                 next;
             }
             if ($line =~ m!</VHost>!i) {
@@ -457,6 +478,7 @@ sub _load_config_ref {
                 push @vhost_stack, $old_vhost;
 
                 $vhost = DJabberd::VHost->new(server_name => $subdomain_name);
+                $vhost->set_server($self);
 
                 # Automatically add the LocalVHosts delivery plugin so that these
                 # VHosts can talk to one another without S2S.

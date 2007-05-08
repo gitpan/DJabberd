@@ -1,12 +1,12 @@
 
 =head1 NAME
 
-DJabberd::Component::External::Component - Connection component for DJabberd::Component::External
+DJabberd::Connection::ComponentIn - JEP-0114 Server
 
 =head1 INTRODUCTION
 
 This class provides the connection and stream handling implementation for the
-DJabberd component DJabberd::Component::External. It is of no interest on its own.
+DJabberd component interface DJabberd::Component::External. It is of little interest on its own.
 
 =head1 LICENCE
 
@@ -17,7 +17,7 @@ under the same terms as DJabberd itself.
 
 =cut
 
-package DJabberd::Component::External::Connection;
+package DJabberd::Connection::ComponentIn;
 use strict;
 use base 'DJabberd::Connection';
 use DJabberd::Log;
@@ -33,7 +33,7 @@ use fields (
 sub new {
     my ($class, $socket, $server, $handler) = @_;
 
-    $logger->debug("Making a $class for fd %d.\n", fileno($socket));
+    $logger->debug("Making a $class for fd ".fileno($socket));
     
     my $self = $class->SUPER::new($socket, $server);
 
@@ -58,7 +58,7 @@ sub namespace {
 }
 
 sub on_stream_start {
-    my DJabberd::Component::External::Connection $self = shift;
+    my DJabberd::Connection::ComponentIn $self = shift;
     my $ss = shift;
     return $self->close unless $ss->xmlns eq $self->namespace; # FIXME: should be stream error
 
@@ -103,6 +103,12 @@ sub on_stanza_received {
 
     unless ($self->{authenticated}) {
         my $type = $node->element;
+        
+        if ($type eq '{urn:ietf:params:xml:ns:xmpp-tls}starttls') {
+            my $stanza = DJabberd::Stanza::StartTLS->downbless($node, $self);
+            $stanza->process($self);
+            return;
+        }
         
         unless ($type eq '{jabber:component:accept}handshake') {
             $logger->warn("Component sent $type stanza before handshake. Discarding.");
