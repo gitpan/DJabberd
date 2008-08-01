@@ -41,7 +41,7 @@ use Socket qw(IPPROTO_TCP TCP_NODELAY SOL_SOCKET SOCK_STREAM);
 use Carp qw(croak);
 use DJabberd::Util qw(tsub as_bool as_num as_abs_path as_bind_addr);
 
-our $VERSION = '0.83';
+our $VERSION = '0.84_01';
 
 our $logger = DJabberd::Log->get_logger();
 our $hook_logger = DJabberd::Log->get_logger("DJabberd::Hook");
@@ -335,6 +335,8 @@ sub _start_server {
     IO::Handle::blocking($server, 0);
 
     my $accept_handler = sub {
+        local *__ANON__ = " Accept handler in ". __FILE__ ." on line ". __LINE__;
+
         my $csock = $server->accept;
         return unless $csock;
 

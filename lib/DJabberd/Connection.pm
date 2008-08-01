@@ -2,6 +2,7 @@ package DJabberd::Connection;
 use strict;
 use warnings;
 use base 'Danga::Socket';
+use bytes;
 use fields (
             'saxhandler',
             'parser',
@@ -12,6 +13,7 @@ use fields (
             'server',         # our DJabberd server object, which we used to find the VHost
             'ssl',            # undef when not in ssl mode, else the $ssl object from Net::SSLeay
             'stream_id',      # undef until set first time
+            'to_host',        # undef until stream start
             'version',        # the DJabberd::StreamVersion we negotiated
             'rcvd_features',  # the features stanza we've received from the other party
             'log',            # Log::Log4perl object for this connection
@@ -23,6 +25,8 @@ use fields (
             'in_stream',      # bool:  true if we're in a stream tag
             'counted_close',  # bool:  temporary here to track down the overcounting of disconnects
             'disconnect_handlers',  # array of coderefs to call when this connection is closed for any reason
+
+            'ssl_empty_read_ct', # int: number of consecutive empty SSL reads.
             );
 
 our $connection_id = 1;
@@ -63,8 +67,8 @@ sub new {
     my ($class, $sock, $server) = @_;
     my $self = $class->SUPER::new($sock);
 
-    croak("Server param not a DJabberd (server) object, actually a '$server'")
-        unless ref $server eq "DJabberd";
+    croak("Server param not a DJabberd (server) object, '" . ref($server) . "'")
+        unless $server->isa("DJabberd");
 
     $self->{vhost}   = undef;  # set once we get a stream start header from them.
     $self->{server}  = $server;
@@ -88,7 +92,7 @@ sub new {
     }
 
     if (XMLDEBUG) {
-        system("mkdir -p " . XMLDEBUG ."$$/");
+        system("mkdir -p " . XMLDEBUG ."/$$/");
         my $handle = IO::Handle->new;
         no warnings;
         my $from = $fromip || "outbound";
@@ -247,6 +251,17 @@ sub set_bound_jid {
     my ($self, $jid) = @_;
     die unless $jid && $jid->isa('DJabberd::JID');
     $self->{bound_jid} = $jid;
+}
+
+sub set_to_host {
+    my ($self, $host) = @_;
+    $self->{to_host} = $host;
+}
+
+sub to_host {
+    my $self = shift;
+    return $self->{to_host} or
+        die "To host accessed before it was set";
 }
 
 sub set_version {
@@ -484,7 +499,17 @@ sub event_read {
 
         # Net::SSLeays buffers internally, so if we didn't read anything, it's
         # in its buffer
-        return unless $data && length $data;
+        unless ($data && length $data) {
+            # a few of these in a row implies an EOF.  else it could
+            # just be the underlying socket was readable, but there
+            # wasn't enough of an SSL packet for OpenSSL/etc to return
+            # any unencrypted data back to us.
+            if (++$self->{'ssl_empty_read_ct'} >= 10) {
+                $self->close('ssl_eof');
+            }
+            return;
+        }
+        $self->{'ssl_empty_read_ct'} = 0;
         $bref = \$data;
     } else {
         # non-ssl mode:
@@ -581,6 +606,7 @@ sub start_stream_back {
 
     # bind us to a vhost now.
     my $to_host     = $ss->to;
+    $self->set_to_host($to_host) if $to_host;
 
     # Spec rfc3920 (dialback section) says: Note: The 'to' and 'from'
     # attributes are OPTIONAL on the root stream element.  (during
@@ -752,6 +778,7 @@ sub close {
     $self->_run_callback_list($self->{disconnect_handlers});
 
     if (my $ssl = $self->{ssl}) {
+        $self->set_writer_func(sub { return 0 });
         Net::SSLeay::free($ssl);
         $self->{ssl} = undef;
     }

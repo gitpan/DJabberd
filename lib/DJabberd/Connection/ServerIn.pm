@@ -14,16 +14,24 @@ sub set_vhost {
     return $self->SUPER::set_vhost($vhost);
 }
 
-sub peer_domain {
-    my $self = shift;
-    return $self->{verified_remote_domain};
+sub peer_domain_is_verified {
+    my ($self, $domain) = @_;
+    return $self->{verified_remote_domain}->{$domain};
 }
 
 sub on_stream_start {
     my ($self, $ss) = @_;
     $self->{in_stream} = 1;
-    return $self->close unless $ss->xmlns eq $self->namespace; # FIXME: should be stream error
 
+    ### namespace mismatch is a streamerror
+    unless( $ss->xmlns eq $self->namespace ) {
+        $self->stream_error( 
+            sprintf "namespace mismatch: client->%s server->%s",
+            $ss->xmlns, $self->namespace
+        );
+        $self->close;
+    }              
+    
     if ($ss->announced_dialback) {
         $self->{announced_dialback} = 1;
         $self->start_stream_back($ss,
@@ -110,8 +118,10 @@ sub dialback_verify_valid {
 }
 
 sub dialback_verify_invalid {
-    my ($self, $reason) = @_;
-    warn "Dialback verify invalid for $self, reason: $reason\n";
+    my $self = shift;
+    my %opts = @_;
+
+    $self->log->warn("Dialback verify invalid for $self, from $opts{orig_server} to $opts{recv_server}, reason: $opts{reason}");
     $self->close_stream;
 }
 
@@ -120,15 +130,16 @@ sub dialback_result_valid {
     my %opts = @_;
 
     my $res = qq{<db:result from='$opts{recv_server}' to='$opts{orig_server}' type='valid'/>};
-    $self->{verified_remote_domain} = $opts{orig_server};
-
+    $self->{verified_remote_domain}->{$opts{orig_server}} = $opts{orig_server};
     $self->log->debug("Dialback result valid for connection $self->{id}.  from=$opts{recv_server}, to=$opts{orig_server}: $res\n");
     $self->write($res);
 }
 
 sub dialback_result_invalid {
-    my ($self, $reason) = @_;
-    $self->log->warn("Dialback result invalid for $self, reason: $reason");
+    my $self = shift;
+    my %opts = @_;
+
+    $self->log->warn("Dialback result invalid for $self, from $opts{orig_server} to $opts{recv_server}, reason: $opts{reason}");
     $self->close_stream;
 }
 

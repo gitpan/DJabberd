@@ -68,11 +68,32 @@ sub is_initial_presence {
 
 sub on_initial_presence {
     my $self = shift;
+    $self->send_resource_presences;
     $self->send_presence_probes;
     $self->send_pending_sub_requests;
 
     $self->vhost->hook_chain_fast('OnInitialPresence',
                                   [ $self ], {});
+}
+
+sub send_resource_presences {
+    my $self = shift;
+
+    my $vhost = $self->vhost;
+    my $my_jid = $self->bound_jid;
+
+    $vhost->check_presence($my_jid, sub {
+        my $map = shift;
+        foreach my $from_jid_str (keys %$map) {
+            next if $from_jid_str eq $my_jid->as_string;
+
+	        my $stanza = $map->{$from_jid_str};
+            my $to_send = $stanza->clone;
+            #$to_send->set_from($from_jid_str); # set_from is happy to recieve a string instead of a JID object
+            $to_send->set_to($my_jid);
+            $to_send->deliver($self);
+        }
+    });
 }
 
 sub send_presence_probes {

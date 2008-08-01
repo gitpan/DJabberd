@@ -102,8 +102,10 @@ sub send_reply {
     $raw ||= "";
     my $id = $self->id;
     my $bj = $conn->bound_jid;
-    my $to = $bj ? ("to='" . $bj->as_string_exml . "'") : "";
-    my $xml = qq{<iq $to type='$type' id='$id'>$raw</iq>};
+    my $from_jid = $self->to;
+    my $to = $bj ? (" to='" . $bj->as_string_exml . "'") : "";
+    my $from = $from_jid ? (" from='" . $from_jid . "'") : "";
+    my $xml = qq{<iq$to$from type='$type' id='$id'>$raw</iq>};
     $conn->xmllog->info($xml);
     $conn->write(\$xml);
 }
@@ -502,9 +504,17 @@ sub process_iq_setauth {
 
 
     my $accept = sub {
+        my $cb = shift;
+        my $authjid = shift;
+
+        # create default JID
+        unless (defined $authjid) {
+            my $sname = $vhost->name;
+            $authjid = "$username\@$sname";
+        }
+
         # register
-        my $sname = $vhost->name;
-        my $jid = DJabberd::JID->new("$username\@$sname/$resource");
+        my $jid = DJabberd::JID->new("$authjid/$resource");
 
         unless ($jid) {
             $reject->();
