@@ -1,5 +1,6 @@
 package DJabberd::VHost;
 use strict;
+use B ();       # improved debugging when hooks are called
 use Carp qw(croak);
 use DJabberd::Util qw(tsub as_bool);
 use DJabberd::Log;
@@ -237,13 +238,42 @@ sub hook_chain_fast {
     }
     push @hooks, $fallback if $fallback;
 
-    my ($cb, $try_another);  # pre-declared here so they're captured by closures below
+    # pre-declared here so they're captured by closures below
+    my ($cb, $try_another, $depth);
+    my $hook_count = scalar @hooks;
+    
     my $stopper = sub {
         $try_another = undef;
     };
     $try_another = sub {
         my $hk = shift @hooks
             or return;
+        
+        # conditional debug statement -- computing this is costly, so only do this
+        # when we are actually running in debug mode --kane
+        if ($logger->is_debug) {   
+            $depth++;
+            
+            # most hooks are anonymous sub refs, and it's hard to determine where they
+            # came from. Sub::Identify gives you only the name (which is __ANON__) and
+            # the filename. This gives us both the filename and line number it's defined
+            # on, giving the user a very clear pointer to which subref will be invoked --kane
+            # 
+            # Since this is B pokery, protect us from doing anything wrong and exiting the 
+            # server accidentally. 
+            my $cv   = B::svref_2object($hk); 
+            my $line = eval { 
+                # $obj is either a B::LISTOP or a B::COP, keep walking up 
+                # till we reach the B::COP, so we can get the line number; 
+                my $obj     = $cv->ROOT->first; 
+                $obj = $obj->first while $obj->can('first'); 
+                $obj->line; 
+            } || "Unknown ($@)"; 
+            $logger->debug( 
+                "For phase [@$phase] invoking hook $depth of $hook_count defined at: ". 
+                $cv->FILE .':'. $line
+            );
+        }
 
         $cb->{_has_been_called} = 0;  # cheating version of: $cb->reset;
         $hk->($self || $hook_inv,

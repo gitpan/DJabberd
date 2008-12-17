@@ -26,7 +26,6 @@ use fields (
             'counted_close',  # bool:  temporary here to track down the overcounting of disconnects
             'disconnect_handlers',  # array of coderefs to call when this connection is closed for any reason
 
-            'ssl_empty_read_ct', # int: number of consecutive empty SSL reads.
             );
 
 our $connection_id = 1;
@@ -504,12 +503,15 @@ sub event_read {
             # just be the underlying socket was readable, but there
             # wasn't enough of an SSL packet for OpenSSL/etc to return
             # any unencrypted data back to us.
-            if (++$self->{'ssl_empty_read_ct'} >= 10) {
+            # We call 'actual_error_on_empty_read' to avoid counting
+            # SSL_ERROR_WANT_READ or SSL_ERROR_WANT_WRITE as 'actual' errors
+            my $err = DJabberd::Stanza::StartTLS->actual_error_on_empty_read($ssl);
+            if ($err) {
+                $self->log->warn("SSL Read error: $err (assuming ssl_eof)");
                 $self->close('ssl_eof');
             }
             return;
         }
-        $self->{'ssl_empty_read_ct'} = 0;
         $bref = \$data;
     } else {
         # non-ssl mode:
@@ -648,6 +650,17 @@ sub start_stream_back {
             && !$self->isa("DJabberd::Connection::ServerIn")) {
             $features_body .= "<starttls xmlns='urn:ietf:params:xml:ns:xmpp-tls' />";
         }
+        if( $self->vhost ){
+          $self->vhost->hook_chain_fast("SendFeatures",
+                                        [ $self ],
+                                        {
+                                            stanza => sub {
+                                              my ($self, $xml_string) = @_;
+                                              $features_body .= $xml_string;
+                                            },
+                                        }
+                                        );          
+        }
         $features = qq{<stream:features>$features_body</stream:features>};
     }
 
@@ -776,12 +789,6 @@ sub close {
 
     $self->log->debug("DISCONNECT: $self->{id}\n") if $self->{id};
     $self->_run_callback_list($self->{disconnect_handlers});
-
-    if (my $ssl = $self->{ssl}) {
-        $self->set_writer_func(sub { return 0 });
-        Net::SSLeay::free($ssl);
-        $self->{ssl} = undef;
-    }
 
     if (my $p = $self->{parser}) {
         # libxml isn't reentrant apparently, so we can't finish_push

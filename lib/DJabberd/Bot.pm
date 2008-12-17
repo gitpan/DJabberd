@@ -10,6 +10,16 @@ use DJabberd::BotContext;
 
 our $logger = DJabberd::Log->get_logger();
 
+### store the object in a closure, so we can retrieve it later
+{   my $singleton;
+    sub singleton { $singleton };
+    
+    sub new {
+        my $self = shift;
+        $singleton = $self->SUPER::new( @_ );
+    }
+}
+
 sub set_config_nodename {
     my ($self, $nodename) = @_;
     $self->{nodename} = $nodename;
@@ -56,7 +66,10 @@ sub register {
     });
 
     $vhost->register_jid($self->{jid}, $self , $regcb);
-    DJabberd::Presence->set_local_presence($self->{jid}, DJabberd::Presence->available(from => $self->{jid}));
+    DJabberd::Presence->set_local_presence(
+        $self->{jid}, 
+        DJabberd::Presence->available( from => $self->{jid} )
+    );
 }
 
 # no-op bot logic:

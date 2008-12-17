@@ -3,6 +3,8 @@ use strict;
 use Carp qw(croak);
 our $AUTOLOAD;
 
+our $logger = DJabberd::Log->get_logger();
+
 sub new {
     #my ($class, $meths) = @_;
     # TODO: track where it was defined at, in debug mode?
@@ -33,6 +35,15 @@ sub AUTOLOAD {
 
     # ignore perl-generated methods
     return unless $meth =~ /[a-z]/;
+
+    # conditional debug statement -- computing this is costly, so only do this
+    # when we are actually running in debug mode --kane
+    if ($logger->is_debug) {   
+        # show who (file:linenumber) called which method on the callback 
+        # and what it's arguments were
+        my @c = caller;
+        $logger->debug( '$callback->'."$meth( @_ ) has been called from $c[1]:$c[2]" );
+    }        
 
     if ($self->{_has_been_called}++) {
         warn "Callback called twice.  ignoring.\n";

@@ -170,4 +170,30 @@ $hook{'ConnectionClosing'} = {
     des => "Gets called when a connection is in closing state, you can't do anything but let it fall through",
 };
 
+# HandleStanza hook is designed to allow plugins to support and respond to additional stanza types.
+# Recipients of the HandleStanza hook must execute thier callbacks synchonously (blocking), 
+# or else we will fall though to the unsupported-stanza-type stream error.
+# This make makes sense, because handling the hook should be a very simple operation:
+# simply provide a class name that implements the processing of the stanza.
+# The actual processing will happen via call to 'process' (should be overriden in class provided).
+$hook{'HandleStanza'} = {
+    args => ['Node', 'Stanza'],
+    callback => {
+      handle => [ 'class' ]
+    },
+    des => "When recieving an unknown stanza, one handler must run 'handle' callback with the class to bless stanza to or result is stream error.",
+};
+
+# SendFeatures hook is designed to allow plugins to send additional items in the stream:features stanza to clients.
+# Recipients of the SendFeatures hook must execute thier callbacks synchonously (blocking), 
+# or else we will fall though to sending only the default features.
+$hook{'SendFeatures'} = {
+  args => ['Connection'],
+  callback => {
+    stanza => [ 'xml_string' ]
+  },
+  des => "When features stanza is sent to the client right after stream start, adds extra xml to the contents of features.",
+};
+
+
 1;
