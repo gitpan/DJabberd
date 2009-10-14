@@ -19,6 +19,7 @@ use DJabberd::Connection::OldSSLClientIn;
 use DJabberd::Connection::Admin;
 
 use DJabberd::Stanza::StartTLS;
+use DJabberd::Stanza::SASL;
 use DJabberd::Stanza::StreamFeatures;
 use DJabberd::Stanza::DialbackVerify;
 use DJabberd::Stanza::DialbackResult;
@@ -41,7 +42,7 @@ use Socket qw(IPPROTO_TCP TCP_NODELAY SOL_SOCKET SOCK_STREAM);
 use Carp qw(croak);
 use DJabberd::Util qw(tsub as_bool as_num as_abs_path as_bind_addr);
 
-our $VERSION = '0.84';
+our $VERSION = '0.85_01';
 
 our $logger = DJabberd::Log->get_logger();
 our $hook_logger = DJabberd::Log->get_logger("DJabberd::Hook");
@@ -164,6 +165,11 @@ sub set_fake_s2s_peer {
 sub fake_s2s_peer {
     my ($self, $host) = @_;
     return $fake_peers{$host};
+}
+
+sub set_config_casesensitive {
+    my ($self, $val) = @_;
+    $DJabberd::JID::CASE_SENSITIVE = as_bool($val);
 }
 
 sub add_vhost {

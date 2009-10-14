@@ -25,7 +25,7 @@ use fields (
             'in_stream',      # bool:  true if we're in a stream tag
             'counted_close',  # bool:  temporary here to track down the overcounting of disconnects
             'disconnect_handlers',  # array of coderefs to call when this connection is closed for any reason
-
+            'sasl',           # the sasl connection object, when sasl has been or is being negotiated
             );
 
 our $connection_id = 1;
@@ -418,6 +418,13 @@ sub ssl {
     return $self->{ssl};
 }
 
+# return the DJabberd::SASL::Connection object attached to this connection
+# if SASL is being or has been negotiated
+sub sasl {
+    my $self = shift;
+    return $self->{sasl};
+}
+
 # called by Danga::Socket when a write doesn't fully go through.  by default it
 # enables writability.  but we want to do nothing if we're waiting for a read for SSL
 sub on_incomplete_write {
@@ -650,16 +657,16 @@ sub start_stream_back {
             && !$self->isa("DJabberd::Connection::ServerIn")) {
             $features_body .= "<starttls xmlns='urn:ietf:params:xml:ns:xmpp-tls' />";
         }
-        if( $self->vhost ){
-          $self->vhost->hook_chain_fast("SendFeatures",
-                                        [ $self ],
-                                        {
-                                            stanza => sub {
-                                              my ($self, $xml_string) = @_;
-                                              $features_body .= $xml_string;
-                                            },
-                                        }
-                                        );          
+        if (my $vh = $self->vhost) {
+            $vh->hook_chain_fast("SendFeatures",
+                                  [ $self ],
+                                  {
+                                      stanza => sub {
+                                        my ($self, $xml_string) = @_;
+                                        $features_body .= $xml_string;
+                                      },
+                                  }
+                                  );
         }
         $features = qq{<stream:features>$features_body</stream:features>};
     }

@@ -1,3 +1,21 @@
+  - Treat the node and domain parts of a JID as case-insensitive as per
+    the XMPP spec. This creates a dependency on the CPAN module
+    Unicode::Stringprep. A backward-compatibility setting is provided
+    for servers that have existing non-normalized JIDs stored,
+    since they are likely to be broken by this change until their
+    stored data is normalized.
+    Patch from Alex Vandiver <alexmv@bestpractical.com>
+
+  - Remove the stream:features-in-dialback quirk hack, since it breaks
+    interop with a few different implementations and is incorrect
+    per spec. This may break interop with some other implementation,
+    but we've been unable to determine which one, so I'm assuming
+    that it's no longer an issue.
+    (Alex Vandiver <alexmv@bestpractical.com>)
+
+  - Small tweak to comment and logging in DJabberd::Connection::ServerOut
+    (Alex Vandiver <alexmv@bestpractical.com>)
+
   - Don't treat hostnames that look like 192.168.0.1.domain.com as IP
     addresses. (Reported by Domrachev Ivan <domrachev.ivan@gmail.com>).
 

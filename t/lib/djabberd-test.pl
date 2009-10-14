@@ -12,12 +12,25 @@ use DJabberd::RosterStorage::InMemoryOnly;
 use DJabberd::Util;
 use IO::Socket::UNIX;
 
+my $HAS_SASL;
+eval "use Authen::SASL 2.13";
+unless ($@) {
+    require DJabberd::SASL::AuthenSASL;
+    $HAS_SASL = 1;
+}
+
 sub once_logged_in {
     my $cb = shift;
+    my $sasl = shift;
     my $server = Test::DJabberd::Server->new(id => 1);
     $server->start;
     my $pa = Test::DJabberd::Client->new(server => $server, name => "partya");
-    $pa->login;
+    if ($sasl) {
+        $pa->sasl_login($sasl);
+    }
+    else {
+        $pa->login;
+    }
     $cb->($pa);
     $server->kill;
 }
@@ -242,6 +255,11 @@ sub roster {
 
 sub standard_plugins {
     my $self = shift;
+    my @sasl;
+    @sasl = ( DJabberd::SASL::AuthenSASL->new(
+                mechanisms => "LOGIN PLAIN DIGEST-MD5",
+                optional   => "yes",
+            )) if $HAS_SASL;
     return [
             DJabberd::Authen::AllowedUsers->new(policy => "deny",
                                                 allowedusers => [qw(partya partyb)]),
@@ -250,7 +268,13 @@ sub standard_plugins {
             ($ENV{T_MUC_ENABLE} ? (DJabberd::Plugin::MUC->new(subdomain => 'conference')) : ()),
             DJabberd::Delivery::Local->new,
             DJabberd::Delivery::S2S->new,
+            @sasl
             ];
+}
+
+sub std_plugins_sans_sasl {
+    my $self = shift;
+    return [ grep { ref($_) !~ /SASL/ } @{ $self->standard_plugins }  ];
 }
 
 sub start {
@@ -259,7 +283,6 @@ sub start {
 
     if ($type eq "djabberd") {
         my $plugins = shift || ($PLUGIN_CB ? $PLUGIN_CB->($self) : $self->standard_plugins);
-
         my $vhost = DJabberd::VHost->new(
                                          server_name => $self->hostname,
                                          s2s         => 1,
@@ -318,6 +341,7 @@ sub DESTROY {
 }
 
 package Test::DJabberd::Client;
+use MIME::Base64;
 use strict;
 
 use overload
@@ -526,18 +550,126 @@ sub connect {
     $self->{sock} = $sock
         or die "Cannot connect to server " . $self->server->id . " ($addr)";
 
-    my $to = $self->server->hostname;
 
+    $self->send_stream_start;
+    $self->{ss} = $self->get_stream_start();
+
+    my $features = $self->recv_xml;
+    warn "FEATURES: $features" if $ENV{TESTDEBUG};
+    die "no features" unless $features =~ /^<features\b/;
+    return 1;
+}
+
+sub send_stream_start {
+    my $self = shift;
+    my $sock = $self->{sock};
+    my $to = $self->server->hostname;
     print $sock "
    <stream:stream
        xmlns:stream='http://etherx.jabber.org/streams'
        xmlns='jabber:client' to='$to' version='1.0'>";
+}
 
-    $self->{ss} = $self->get_stream_start();
+sub sasl_login {
+    my $self = shift;
+    my $sasl = shift;
+    my $res  = shift;
+    my $sec  = shift;
+
+    warn "connecting for login..\n" if $ENV{TESTDEBUG};
+    $self->connect or die "Failed to connect";
+
+    warn ".. connected after login.\n" if $ENV{TESTDEBUG};
+
+    my $ss = $self->{ss};
+    my $sock = $self->{sock};
+    my $to = $self->server->hostname;
+    my $conn = $sasl->client_new("xmpp", $to, $sec);
+
+    my $mechanism = $conn->mechanism;
+    my $init = $conn->client_start();
+    warn "sending conn auth...$init\n" if $ENV{TESTDEBUG};
+    $init = $init ? encode_base64($init, '') : "=";
+    print $sock "<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='$mechanism'>$init</auth>";
+
+    my $got_success_already = 0;
+    while ($conn->need_step) {
+        my $challenge = $self->recv_xml;
+        warn "challenge response: [$challenge]\n" if $ENV{TESTDEBUG};
+        die "Didn't get expected response: $challenge" unless $challenge =~ /challenge|success\b/;
+        $challenge =~ s/^.*>(.+)<.*$/$1/sm;
+        $challenge = decode_base64($challenge);
+        warn "decoded challenge: [$challenge]\n" if $ENV{TESTDEBUG};
+
+        my $response = $conn->client_step($challenge);
+        if ($conn->is_success) {
+            $got_success_already = 1;
+        }
+        else {
+            warn "sending conn response [$response]\n" if $ENV{TESTDEBUG};
+            $response = $response ? encode_base64($response, '') : "="; # dupe
+            print $sock "<response xmlns='urn:ietf:params:xml:ns:xmpp-sasl'>$response</response>";
+        }
+    }
+    if (my $error = $conn->error) {
+        die "error in SASL $error";
+    }
+
+    unless ($got_success_already) {
+        my $final = $self->recv_xml;
+        die "auth error $final" unless $final && $final =~ /success/;
+    }
+    $self->{ss} = undef;
+    delete $self->{ss};
+
+    $self->send_stream_start;
+    $self->get_stream_start;
 
     my $features = $self->recv_xml;
+    warn "FEATURES: $features" if $ENV{TESTDEBUG};
     die "no features" unless $features =~ /^<features\b/;
-    return 1;
+    die "no bind"     unless $features =~ /bind\b/sm;
+    die "no session"  unless $features =~ /session\b/sm;
+
+    return $self->bind_resource($res);
+}
+
+sub bind_resource {
+    my $self = shift;
+    my $res  = shift;
+    my $sock = $self->{sock};
+
+    print $sock <<EOB;
+<iq type='set' id='purple81e4b57b'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><resource>$res</resource></bind></iq>
+EOB
+    my $iq = $self->recv_xml_obj;
+    die "invalid bind response" unless $iq->element_name eq 'iq';
+    my $bind = $iq->first_element;
+    die "invalid bind response " unless $bind->element_name eq 'bind';
+    my $jid_el = $bind  ->first_element or die "no jid elt...";
+    my $jid    = $jid_el->first_child   or die "no jid...";
+    return DJabberd::JID->new($jid);
+}
+
+sub abort_sasl_login {
+    my $self = shift;
+    my $sasl = shift;
+    my $sec  = shift;
+
+    $self->connect or die "Failed to connect";
+    my $ss = $self->{ss};
+    my $sock = $self->{sock};
+    my $to = $self->server->hostname;
+    my $conn = $sasl->client_new("xmpp", $to, $sec);
+
+    my $mechanism = $conn->mechanism;
+    my $init = $conn->client_start();
+    $init = $init ? encode_base64($init, '') : "=";
+    print $sock "<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='$mechanism'>$init</auth>";
+
+    my $challenge = $self->recv_xml;
+    print $sock "<abort xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>";
+    return $self->recv_xml;
 }
 
 sub login {

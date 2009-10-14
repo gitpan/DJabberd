@@ -60,6 +60,7 @@ lib/DJabberd/Stanza/DialbackResult.pm
 lib/DJabberd/Stanza/DialbackVerify.pm
 lib/DJabberd/Stanza/StartTLS.pm
 lib/DJabberd/Stanza/StreamFeatures.pm
+lib/DJabberd/Stanza/SASL.pm
 lib/DJabberd/Stats.pm
 lib/DJabberd/StreamStart.pm
 lib/DJabberd/StreamVersion.pm
@@ -69,6 +70,10 @@ lib/DJabberd/Util.pm
 lib/DJabberd/VHost.pm
 lib/DJabberd/XMLElement.pm
 lib/DJabberd/XMLParser.pm
+lib/DJabberd/SASL/Connection/AuthenSASL.pm
+lib/DJabberd/SASL/Manager/AuthenSASL.pm
+lib/DJabberd/SASL/AuthenSASL.pm
+lib/DJabberd/SASL.pm
 Makefile.PL
 MANIFEST
 MANIFEST.SKIP
@@ -94,3 +99,4 @@ t/versions.t
 t/write-error-and-close.t
 t/xmlparsing.t
 t/89_xmldebug.t
+t/jidcase.t

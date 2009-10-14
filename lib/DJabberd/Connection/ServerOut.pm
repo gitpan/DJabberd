@@ -1,4 +1,4 @@
-# outgoing connection to another server for the sole purpose of verifying a dialback result.
+# outgoing connection to another server, including setting up dialback secret
 package DJabberd::Connection::ServerOut;
 use strict;
 use base 'DJabberd::Connection';
@@ -77,21 +77,12 @@ sub on_stream_start {
     $self->{in_stream} = 1;
     $self->log->debug("We got a stream back from connection $self->{id}!\n");
     unless ($ss->announced_dialback) {
-        $self->log->warn("Connection $self->{id} doesn't support dialbacl, failing");
+        $self->log->warn("Connection $self->{id} doesn't support dialback, failing");
         $self->{queue}->on_connection_failed($self, "no dialback");
         return;
     }
 
     $self->log->debug("Connection $self->{id} supports dialback");
-
-    if ($ss->version->supports_features) {
-        # they can eat a dick for all we care.  they get no features.
-        # what is this weird XMPP 1.0 + old-school Dialback world anyway?
-        # maybe we're still confused.  FIXME: care.
-        my $features = "<stream:features></stream:features>";
-        $self->write($features);
-        $self->log->debug("$self->{id} sending '$features'");
-    }
 
     my $vhost       = $self->{queue}->vhost;
     my $orig_server = $vhost->name;
