@@ -2,6 +2,7 @@
 .shipit
 
 # Avoid version control files.
+\.git
 \bRCS\b
 \bCVS\b
 ,v$
@@ -23,3 +24,6 @@
 \.old$
 \#$
 \b\.#
+
+## you don't really need website? do you?
+website/

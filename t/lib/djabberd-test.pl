@@ -13,7 +13,7 @@ use DJabberd::Util;
 use IO::Socket::UNIX;
 
 my $HAS_SASL;
-eval "use Authen::SASL 2.13";
+eval "use Authen::SASL 2.1402";
 unless ($@) {
     require DJabberd::SASL::AuthenSASL;
     $HAS_SASL = 1;
@@ -311,6 +311,15 @@ sub start {
         
         my $childpid = fork;
         if (!$childpid) {
+            unless ($ENV{TESTDEBUG}) {
+                ## no spurious output unless debugging
+                close(STDIN);
+                close(STDOUT);
+                close(STDERR);
+                open(STDIN,  "+>/dev/null");
+                open(STDOUT, "+>&STDIN");
+                open(STDERR, "+>&STDIN");
+            }
             $server->run;
             exit 0;
         }
@@ -556,7 +565,7 @@ sub connect {
 
     my $features = $self->recv_xml;
     warn "FEATURES: $features" if $ENV{TESTDEBUG};
-    die "no features" unless $features =~ /^<features\b/;
+    die "no features" unless $features =~ /^<([^\:]+\:)?features\b/;
     return 1;
 }
 
@@ -573,13 +582,13 @@ sub send_stream_start {
 sub sasl_login {
     my $self = shift;
     my $sasl = shift;
-    my $res  = shift;
+    my $res  = shift || '';
     my $sec  = shift;
 
-    warn "connecting for login..\n" if $ENV{TESTDEBUG};
+    warn "connecting for sasl login..\n" if $ENV{TESTDEBUG};
     $self->connect or die "Failed to connect";
 
-    warn ".. connected after login.\n" if $ENV{TESTDEBUG};
+    warn ".. connected after sasl login.\n" if $ENV{TESTDEBUG};
 
     my $ss = $self->{ss};
     my $sock = $self->{sock};
@@ -597,9 +606,11 @@ sub sasl_login {
         my $challenge = $self->recv_xml;
         warn "challenge response: [$challenge]\n" if $ENV{TESTDEBUG};
         die "Didn't get expected response: $challenge" unless $challenge =~ /challenge|success\b/;
-        $challenge =~ s/^.*>(.+)<.*$/$1/sm;
-        $challenge = decode_base64($challenge);
-        warn "decoded challenge: [$challenge]\n" if $ENV{TESTDEBUG};
+
+        if ($challenge =~ s/^.*>(.+)<.*$/$1/sm) {
+            $challenge = decode_base64($challenge);
+            warn "decoded challenge: [$challenge]\n" if $ENV{TESTDEBUG};
+        }
 
         my $response = $conn->client_step($challenge);
         if ($conn->is_success) {
@@ -627,7 +638,7 @@ sub sasl_login {
 
     my $features = $self->recv_xml;
     warn "FEATURES: $features" if $ENV{TESTDEBUG};
-    die "no features" unless $features =~ /^<features\b/;
+    die "no features" unless $features =~ /^<([^\:]+\:)?features\b/;
     die "no bind"     unless $features =~ /bind\b/sm;
     die "no session"  unless $features =~ /session\b/sm;
 

@@ -1,3 +1,21 @@
+0.85 2011-06-13 *CRITICAL SECURITY RELEASE*
+  - Fix an XML entity injection attack allowing the attacker to read random files
+    from the server. Reported by Wouter Coekaerts <wouter@coekaerts.be>.
+    (Yann Kerherve <yann@cyberion.net>)
+
+  - Support intermediate SSL certificates.
+    (Rajiv Aaron Manglani <rajiv@brontes3d.com>)
+
+  - SASL support (Previously released, but not advertised here)
+    (Yann Kerherve <yann@cyberion.net>)
+
+  - Implement proper support for XML namespace prefixes
+    (Daniel Ruoso <daniel@ruoso.com>)
+
+  - Meta: djabberd is now hosted on http://github.com/djabberd
+
+  - Meta: The core repository is now separated from plugins.
+
   - Treat the node and domain parts of a JID as case-insensitive as per
     the XMPP spec. This creates a dependency on the CPAN module
     Unicode::Stringprep. A backward-compatibility setting is provided
@@ -5,6 +23,12 @@
     since they are likely to be broken by this change until their
     stored data is normalized.
     Patch from Alex Vandiver <alexmv@bestpractical.com>
+
+  - Some configuration file docs
+    (Alex Vandiver <alexmv@bestpractical.com>)
+
+  - Improve debugging information for S2S connections.
+    (Alex Vandiver <alexmv@bestpractical.com>)
 
   - Remove the stream:features-in-dialback quirk hack, since it breaks
     interop with a few different implementations and is incorrect
